@@ -23,7 +23,22 @@ CREDENTIALS_FILE = 'credentials.json'
 def authenticate_google_sheets_oauth():
     """Authenticate with Google Sheets API using Streamlit interface for local testing."""
     creds = None
+    query_params = st.query_params
 
+    # Check environment to determine redirect URI
+    if "ggl-sheet-merger.streamlit.app" in os.environ.get("SERVER_NAME", ""):
+        redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
+    else:
+        redirect_uri = "http://localhost:8501/"
+
+    # Determine redirect URI from secrets or environment
+    if "google" in st.secrets and "redirect_uri" in st.secrets["google"]:
+        redirect_uri = st.secrets["google"]["redirect_uri"]
+    elif "ggl-sheet-merger.streamlit.app" in os.environ.get("SERVER_NAME", ""):
+        redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
+    else:
+        redirect_uri = "http://localhost:8501/"
+        
     # Check for existing token in session state
     if "sheets_token_info" in st.session_state:
         try:
@@ -60,11 +75,11 @@ def authenticate_google_sheets_oauth():
         st.error(f"Google credentials missing. Please provide '{CREDENTIALS_FILE}' in the app directory or configure st.secrets['google']['credentials_json'].")
         return None
 
-    # Configure OAuth flow for local testing
+    # Configure OAuth flow
     flow = Flow.from_client_config(
         client_config=creds_data,
         scopes=SCOPES,
-        redirect_uri="http://localhost:8501/"
+        redirect_uri=redirect_uri  # Use the appropriate URI
     )
 
     # Generate authorization URL
@@ -92,8 +107,10 @@ def authenticate_google_sheets_oauth():
         st.markdown("### 🔐 Google Sheets Authentication Required")
         st.markdown(f"""
         1. [**Authorize with Google**]({auth_url})
-        2. You'll be redirected back to this app with a code in the URL.
-        3. If the redirect fails, copy the entire URL after authorization and paste it in your browser.
+        2. You'll be redirected back to this app
+        3. If the redirect fails, ensure you're using the correct URL:
+        - **Local**: `http://localhost:8501/`
+        - **Production**: `https://ggl-sheet-merger.streamlit.app/`
         """)
         st.stop()
 
