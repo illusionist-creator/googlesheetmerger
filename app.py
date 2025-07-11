@@ -25,28 +25,11 @@ def authenticate_google_sheets_oauth():
     creds = None
     query_params = st.query_params
 
-    # Determine redirect URI - prioritize secrets, then detect from current URL
-    redirect_uri = None
-    
-    # First check secrets
-    if "google" in st.secrets and "redirect_uri" in st.secrets["google"]:
-        redirect_uri = st.secrets["google"]["redirect_uri"]
-    else:
-        # Auto-detect based on current environment
-        # In Streamlit Cloud, we can detect the URL from the browser
-        # For production, always use the Streamlit app URL
-        if "streamlit.app" in st.secrets.get("general", {}).get("app_url", ""):
-            redirect_uri = st.secrets["general"]["app_url"]
-        elif hasattr(st, 'get_option') and 'server.headless' in st.get_option('server.headless', True):
-            # Running in Streamlit Cloud
-            redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
-        else:
-            # Local development
-            redirect_uri = "http://localhost:8501/"
-    
-    # Fallback to your production URL if nothing else works
-    if not redirect_uri:
+    # Determine redirect URI based on deployment environment
+    if st.secrets.get("IS_CLOUD_DEPLOYMENT", False):
         redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
+    else:
+        redirect_uri = "http://localhost:8501/"
         
     # Check for existing token in session state
     if "sheets_token_info" in st.session_state:
