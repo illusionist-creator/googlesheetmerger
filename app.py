@@ -21,23 +21,32 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 CREDENTIALS_FILE = 'credentials.json'
 
 def authenticate_google_sheets_oauth():
-    """Authenticate with Google Sheets API using Streamlit interface for local testing."""
+    """Authenticate with Google Sheets API using Streamlit interface."""
     creds = None
     query_params = st.query_params
 
-    # Check environment to determine redirect URI
-    if "ggl-sheet-merger.streamlit.app" in os.environ.get("SERVER_NAME", ""):
-        redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
-    else:
-        redirect_uri = "http://localhost:8501/"
-
-    # Determine redirect URI from secrets or environment
+    # Determine redirect URI - prioritize secrets, then detect from current URL
+    redirect_uri = None
+    
+    # First check secrets
     if "google" in st.secrets and "redirect_uri" in st.secrets["google"]:
         redirect_uri = st.secrets["google"]["redirect_uri"]
-    elif "ggl-sheet-merger.streamlit.app" in os.environ.get("SERVER_NAME", ""):
-        redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
     else:
-        redirect_uri = "http://localhost:8501/"
+        # Auto-detect based on current environment
+        # In Streamlit Cloud, we can detect the URL from the browser
+        # For production, always use the Streamlit app URL
+        if "streamlit.app" in st.secrets.get("general", {}).get("app_url", ""):
+            redirect_uri = st.secrets["general"]["app_url"]
+        elif hasattr(st, 'get_option') and 'server.headless' in st.get_option('server.headless', True):
+            # Running in Streamlit Cloud
+            redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
+        else:
+            # Local development
+            redirect_uri = "http://localhost:8501/"
+    
+    # Fallback to your production URL if nothing else works
+    if not redirect_uri:
+        redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
         
     # Check for existing token in session state
     if "sheets_token_info" in st.session_state:
@@ -79,14 +88,13 @@ def authenticate_google_sheets_oauth():
     flow = Flow.from_client_config(
         client_config=creds_data,
         scopes=SCOPES,
-        redirect_uri=redirect_uri  # Use the appropriate URI
+        redirect_uri=redirect_uri
     )
 
     # Generate authorization URL
     auth_url, _ = flow.authorization_url(prompt='consent')
 
     # Check for callback code
-    query_params = st.query_params
     if "code" in query_params:
         try:
             code = query_params["code"]
@@ -99,6 +107,7 @@ def authenticate_google_sheets_oauth():
             
             # Clear the code from URL to prevent re-authentication loop
             st.query_params.clear()
+            st.rerun()
             return build("sheets", "v4", credentials=creds)
         except Exception as e:
             st.error(f"Authentication failed: {str(e)}. Please try again.")
@@ -106,12 +115,21 @@ def authenticate_google_sheets_oauth():
     else:
         st.markdown("### 🔐 Google Sheets Authentication Required")
         st.markdown(f"""
+        **Current redirect URI:** `{redirect_uri}`
+        
         1. [**Authorize with Google**]({auth_url})
         2. You'll be redirected back to this app
-        3. If the redirect fails, ensure you're using the correct URL:
-        - **Local**: `http://localhost:8501/`
-        - **Production**: `https://ggl-sheet-merger.streamlit.app/`
+        3. If you encounter issues, ensure your Google Cloud Console has the correct redirect URI configured
         """)
+        
+        # Add debug info
+        with st.expander("🔧 Debug Information"):
+            st.write(f"**Redirect URI being used:** {redirect_uri}")
+            st.write("**Make sure this URI is configured in your Google Cloud Console:**")
+            st.write("1. Go to Google Cloud Console → APIs & Services → Credentials")
+            st.write("2. Edit your OAuth 2.0 Client ID")
+            st.write("3. Add the redirect URI shown above to 'Authorized redirect URIs'")
+        
         st.stop()
 
     return None
