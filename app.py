@@ -26,7 +26,7 @@ def authenticate_google_sheets_oauth():
     query_params = st.query_params
 
     # Determine redirect URI based on deployment environment
-    if st.secrets.get("IS_CLOUD_DEPLOYMENT", False):
+    if st.secrets.get("IS_CLOUD_DEPLOYMENT", True):
         redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
     else:
         redirect_uri = "http://localhost:8501/"
@@ -99,19 +99,19 @@ def authenticate_google_sheets_oauth():
         st.markdown("### 🔐 Google Sheets Authentication Required")
         st.markdown(f"""
         **Current redirect URI:** `{redirect_uri}`
-        
+
         1. [**Authorize with Google**]({auth_url})
         2. You'll be redirected back to this app
         3. If you encounter issues, ensure your Google Cloud Console has the correct redirect URI configured
         """)
         
-        # Add debug info
-        with st.expander("🔧 Debug Information"):
-            st.write(f"**Redirect URI being used:** {redirect_uri}")
-            st.write("**Make sure this URI is configured in your Google Cloud Console:**")
-            st.write("1. Go to Google Cloud Console → APIs & Services → Credentials")
-            st.write("2. Edit your OAuth 2.0 Client ID")
-            st.write("3. Add the redirect URI shown above to 'Authorized redirect URIs'")
+        # 🔧 Debug info (no expander)
+        st.markdown("#### 🔧 Debug Information")
+        st.write(f"**Redirect URI being used:** {redirect_uri}")
+        st.write("**Make sure this URI is configured in your Google Cloud Console:**")
+        st.write("1. Go to Google Cloud Console → APIs & Services → Credentials")
+        st.write("2. Edit your OAuth 2.0 Client ID")
+        st.write("3. Add the redirect URI shown above to 'Authorized redirect URIs'")
         
         st.stop()
 
