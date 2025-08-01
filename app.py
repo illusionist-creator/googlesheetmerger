@@ -75,25 +75,54 @@ def authenticate_google_sheets_oauth():
     )
 
     # Generate authorization URL
-    auth_url, _ = flow.authorization_url(prompt='consent')
+    auth_url, state = flow.authorization_url(
+        prompt='consent',
+        access_type='offline',
+        include_granted_scopes='true')
+
+    # Store state for verification
+    st.session_state.oauth_state = state
 
     # Check for callback code
     if "code" in query_params:
         try:
             code = query_params["code"]
-            flow.fetch_token(code=code)
-            creds = flow.credentials
+            received_state = query_params.get("state")
+            
+            # Verify state parameter
+            if received_state != st.session_state.get("oauth_state"):
+                st.error("Authentication state mismatch. Please try again.")
+                st.query_params.clear()
+                if "oauth_state" in st.session_state:
+                    del st.session_state["oauth_state"]
+                return None
+            
+            # Create a new flow instance for token exchange
+            token_flow = Flow.from_client_config(
+                client_config=creds_data,
+                scopes=SCOPES,
+                redirect_uri=redirect_uri,
+                state=received_state
+            )
+            
+            token_flow.fetch_token(code=code)
+            creds = token_flow.credentials
 
             # Save credentials in session state
             st.session_state.sheets_token_info = json.loads(creds.to_json())
             st.success("Google Sheets authentication successful!")
             
-            # Clear the code from URL to prevent re-authentication loop
+            # Clear the code and state from URL and session
             st.query_params.clear()
+            if "oauth_state" in st.session_state:
+                del st.session_state["oauth_state"]
             st.rerun()
             return build("sheets", "v4", credentials=creds)
         except Exception as e:
             st.error(f"Authentication failed: {str(e)}. Please try again.")
+            st.query_params.clear()
+            if "oauth_state" in st.session_state:
+                del st.session_state["oauth_state"]
             return None
     else:
         st.markdown("### 🔐 Google Sheets Authentication Required")
