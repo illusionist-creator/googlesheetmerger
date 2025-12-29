@@ -21,7 +21,7 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 CREDENTIALS_FILE = 'credentials.json'
 
 def authenticate_google_sheets_oauth():
-    """Authenticate with Google Sheets API using Streamlit interface."""
+    """Authenticate with Google Sheets API using Streamlit interface - FIXED VERSION"""
     creds = None
     query_params = st.query_params
 
@@ -30,7 +30,7 @@ def authenticate_google_sheets_oauth():
         redirect_uri = "https://ggl-sheet-merger.streamlit.app/"
     else:
         redirect_uri = "http://localhost:8501/"
-        
+    
     # Check for existing token in session state
     if "sheets_token_info" in st.session_state:
         try:
@@ -67,31 +67,31 @@ def authenticate_google_sheets_oauth():
         st.error(f"Google credentials missing. Please provide '{CREDENTIALS_FILE}' in the app directory or configure st.secrets['google']['credentials_json'].")
         return None
 
-    # Check for callback code FIRST (before generating new auth URL)
-    if "code" in query_params and "state" in query_params:
+    # Check for callback code from OAuth redirect
+    if "code" in query_params:
         try:
             code = query_params["code"]
-            received_state = query_params["state"]
+            received_state = query_params.get("state")
             
-            # Verify state parameter
+            # Verify state parameter if it exists
             expected_state = st.session_state.get("oauth_state")
-            if not expected_state or received_state != expected_state:
+            if expected_state and received_state != expected_state:
                 st.error("Authentication state mismatch. Please try again.")
                 st.query_params.clear()
                 if "oauth_state" in st.session_state:
                     del st.session_state["oauth_state"]
                 st.stop()
             
-            # Create a new flow instance for token exchange
-            token_flow = Flow.from_client_config(
+            # Create flow with the SAME redirect_uri used for authorization
+            flow = Flow.from_client_config(
                 client_config=creds_data,
                 scopes=SCOPES,
-                redirect_uri=redirect_uri,
-                state=received_state
+                redirect_uri=redirect_uri
             )
             
-            token_flow.fetch_token(code=code)
-            creds = token_flow.credentials
+            # Exchange authorization code for credentials
+            flow.fetch_token(code=code)
+            creds = flow.credentials
 
             # Save credentials in session state
             st.session_state.sheets_token_info = json.loads(creds.to_json())
@@ -112,20 +112,20 @@ def authenticate_google_sheets_oauth():
                 del st.session_state["oauth_state"]
             st.stop()
 
-    # Generate authorization URL only if not in callback
+    # Generate authorization URL (only if not in callback flow)
     flow = Flow.from_client_config(
         client_config=creds_data,
         scopes=SCOPES,
         redirect_uri=redirect_uri
     )
 
-    # Generate authorization URL
+    # Generate authorization URL with state parameter
     auth_url, state = flow.authorization_url(
         prompt='consent',
         access_type='offline',
         include_granted_scopes='true')
 
-    # Store state for verification - use a more persistent key
+    # Store state for verification
     st.session_state.oauth_state = state
     
     st.markdown("### 🔐 Google Sheets Authentication Required")
@@ -706,176 +706,165 @@ def main():
                     with col3:
                         if st.button(f"🗑️ Remove", key=f"remove_{i}", type="secondary"):
                             st.session_state.combiner.sheets_data.pop(i)
-                            st.success(f"🗑️ Removed '{sheet['display_name']}'")
+                            st.success(f"Removed '{sheet['display_name']}'")
                             st.rerun()
         
         st.markdown("---")
         
-        # Combine and Download Section
-        st.markdown("## 📥 Combine & Export")
-        
+        # Combine and Export Section
         if len(st.session_state.combiner.sheets_data) > 0:
-            col1, col2 = st.columns([2, 1])
+            st.markdown("## 🔄 Combine & Export")
+            
+            col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("🔗 Combine All Sheets", type="primary", use_container_width=True):
-                    with st.spinner("🔄 Combining sheets..."):
-                        try:
+                if st.button("🔄 Combine Sheets", type="primary", use_container_width=True):
+                    try:
+                        with st.spinner("🔄 Combining sheets..."):
                             combined_df = st.session_state.combiner.combine_sheets()
-                            st.session_state.combined_ready = True
-                            st.success(f"✅ Successfully combined {len(st.session_state.combiner.sheets_data)} sheets!")
-                        except Exception as e:
-                            st.error(f"❌ Error combining sheets: {e}")
-                            st.session_state.combined_ready = False
+                            summary = st.session_state.combiner.get_summary()
+                        
+                        st.success("✅ Sheets combined successfully!")
+                        
+                        # Display summary
+                        st.markdown("### 📊 Summary")
+                        
+                        metric_cols = st.columns(3)
+                        with metric_cols[0]:
+                            st.metric("Total Rows", summary['total_rows'])
+                        with metric_cols[1]:
+                            st.metric("Total Columns", summary['total_columns'])
+                        with metric_cols[2]:
+                            st.metric("Sheets Combined", len(summary['sheets']))
+                        
+                        # Sheet breakdown
+                        st.markdown("#### 📋 Sheet Breakdown")
+                        for sheet_stat in summary['sheets']:
+                            st.markdown(f"""
+                            <div class="metric-container">
+                                <strong>{sheet_stat['name']}</strong>: {sheet_stat['rows']} rows (Header Row: {sheet_stat['header_row']})
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        # Preview combined data
+                        st.markdown("### 👁️ Combined Data Preview")
+                        st.dataframe(combined_df.head(20), use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error combining sheets: {str(e)}")
             
             with col2:
-                st.metric("Total Sheets", len(st.session_state.combiner.sheets_data))
-            
-            # Show combined data summary and download options
-            if hasattr(st.session_state, 'combined_ready') and st.session_state.combined_ready:
-                st.markdown("---")
-                st.markdown("### 📊 Combined Data Summary")
-                
-                summary = st.session_state.combiner.get_summary()
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h3>{summary['total_rows']}</h3>
-                        <p>Total Rows</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h3>{summary['total_columns']}</h3>
-                        <p>Total Columns</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col3:
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h3>{len(summary['sheets'])}</h3>
-                        <p>Sheets Combined</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # Sheet breakdown
-                with st.expander("📊 Sheet Breakdown", expanded=False):
-                    for sheet in summary['sheets']:
-                        st.markdown(f"**{sheet['name']}**: {sheet['rows']} rows (Header: Row {sheet['header_row']})")
-                
-                # Preview combined data
-                st.markdown("### 👁️ Preview Combined Data")
-                st.dataframe(st.session_state.combiner.combined_data.head(20), use_container_width=True)
-                
-                # Download options
-                st.markdown("### 📥 Download Options")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    # CSV Download
-                    csv_buffer = io.StringIO()
-                    st.session_state.combiner.combined_data.to_csv(csv_buffer, index=False)
-                    csv_data = csv_buffer.getvalue()
+                if st.session_state.combiner.combined_data is not None and not st.session_state.combiner.combined_data.empty:
+                    # Export options
+                    st.markdown("### 💾 Export Options")
                     
-                    st.download_button(
-                        label="📄 Download as CSV",
-                        data=csv_data,
-                        file_name=f"combined_sheets_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        use_container_width=True
+                    export_format = st.selectbox(
+                        "Select Export Format",
+                        options=["CSV", "Excel", "JSON"],
+                        key="export_format"
                     )
-                
-                with col2:
-                    # Excel Download
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        st.session_state.combiner.combined_data.to_excel(writer, index=False, sheet_name='Combined Data')
-                    excel_data = excel_buffer.getvalue()
                     
-                    st.download_button(
-                        label="📊 Download as Excel",
-                        data=excel_data,
-                        file_name=f"combined_sheets_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
+                    filename = st.text_input(
+                        "Filename (without extension)",
+                        value=f"combined_sheets_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                        key="export_filename"
                     )
-                
-                with col3:
-                    # JSON Download
-                    json_data = st.session_state.combiner.combined_data.to_json(orient='records', indent=2)
                     
-                    st.download_button(
-                        label="📜 Download as JSON",
-                        data=json_data,
-                        file_name=f"combined_sheets_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json",
-                        use_container_width=True
-                    )
-        else:
-            st.info("👉 Add at least one sheet using the sidebar to get started!")
-    
+                    if st.button("💾 Download", type="primary", use_container_width=True):
+                        try:
+                            if export_format == "CSV":
+                                csv_data = st.session_state.combiner.combined_data.to_csv(index=False)
+                                st.download_button(
+                                    label="📥 Download CSV",
+                                    data=csv_data,
+                                    file_name=f"{filename}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
+                            
+                            elif export_format == "Excel":
+                                output = io.BytesIO()
+                                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                    st.session_state.combiner.combined_data.to_excel(writer, index=False, sheet_name='Combined')
+                                excel_data = output.getvalue()
+                                
+                                st.download_button(
+                                    label="📥 Download Excel",
+                                    data=excel_data,
+                                    file_name=f"{filename}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            
+                            elif export_format == "JSON":
+                                json_data = st.session_state.combiner.combined_data.to_json(orient='records', indent=2)
+                                st.download_button(
+                                    label="📥 Download JSON",
+                                    data=json_data,
+                                    file_name=f"{filename}.json",
+                                    mime="application/json",
+                                    use_container_width=True
+                                )
+                            
+                            st.success(f"✅ {export_format} file ready for download!")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Error exporting data: {str(e)}")
+                else:
+                    st.info("💡 Combine sheets first to enable export options")
+        
     else:
-        # Welcome screen when no sheets are added
+        # Empty state
         st.markdown("""
         <div class="info-box">
             <h3>👋 Welcome to Google Sheets Combiner!</h3>
-            <p>This tool helps you combine multiple Google Sheets into a single file.</p>
-            <br>
-            <h4>🚀 Getting Started:</h4>
+            <p>Get started by adding your first sheet:</p>
             <ol>
-                <li><strong>Connect (Optional):</strong> For private sheets, connect to Google Sheets in the sidebar</li>
-                <li><strong>Add Sheets:</strong> Paste a Google Sheets URL in the sidebar</li>
-                <li><strong>Select & Configure:</strong> Choose which sheet to add and configure header row</li>
-                <li><strong>Combine:</strong> Once you've added all sheets, combine them into one</li>
-                <li><strong>Download:</strong> Export as CSV, Excel, or JSON</li>
+                <li>📝 Enter a Google Sheets URL in the sidebar</li>
+                <li>🔍 Select the sheet you want to add</li>
+                <li>⚙️ Configure header row and custom name (optional)</li>
+                <li>➕ Click "Add" to include it</li>
+                <li>🔄 Repeat for multiple sheets</li>
+                <li>🎉 Combine and export your data!</li>
             </ol>
-            <br>
-            <h4>✨ Features:</h4>
-            <ul>
-                <li>🔐 Works with both public and private Google Sheets</li>
-                <li>📋 Select specific sheets from multi-sheet documents</li>
-                <li>⚙️ Configure header rows for each sheet</li>
-                <li>🏷️ Give custom names to sheets for better organization</li>
-                <li>📥 Download in multiple formats (CSV, Excel, JSON)</li>
-            </ul>
+            <p><strong>💡 Tip:</strong> For private sheets, use the "Connect to Google Sheets" button in the sidebar to authenticate.</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Example section
-        st.markdown("---")
-        st.markdown("### 📖 Example Use Cases")
-        
+        # Feature highlights
         col1, col2, col3 = st.columns(3)
         
         with col1:
             st.markdown("""
             <div class="sheet-card">
-                <h4>📊 Data Analysis</h4>
-                <p>Combine multiple survey responses or data collection sheets into one master dataset for analysis.</p>
+                <h4>🔒 Secure Authentication</h4>
+                <p>Connect with Google OAuth to access private sheets securely</p>
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
             st.markdown("""
             <div class="sheet-card">
-                <h4>📅 Event Planning</h4>
-                <p>Merge attendee lists, vendor information, and budget sheets from different event planning documents.</p>
+                <h4>🔄 Multiple Sheets</h4>
+                <p>Combine data from multiple sheets and workbooks effortlessly</p>
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             st.markdown("""
             <div class="sheet-card">
-                <h4>💼 Business Reporting</h4>
-                <p>Consolidate sales data, inventory reports, and financial sheets from multiple departments.</p>
+                <h4>💾 Export Options</h4>
+                <p>Download combined data in CSV, Excel, or JSON format</p>
             </div>
             """, unsafe_allow_html=True)
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666; padding: 1rem;">
+        <p>Built with ❤️ using Streamlit | Google Sheets Combiner v1.0</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
